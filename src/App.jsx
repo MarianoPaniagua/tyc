@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
-import { addDoc, collection, deleteDoc, deleteField, doc, getDocs, serverTimestamp, updateDoc } from 'firebase/firestore'
+import { addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { auth, db, firebaseConfigured, googleProvider } from './firebase/config'
 import { areas as defaultAreas, initialSearches } from './data'
 
@@ -67,6 +67,7 @@ const searchDeadlineInput = search => {
 function App() {
   const [authUser, setAuthUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [accessDenied, setAccessDenied] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [logoutError, setLogoutError] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
@@ -100,9 +101,24 @@ function App() {
       setAuthLoading(false)
       return undefined
     }
-    return onAuthStateChanged(auth, user => {
-      setAuthUser(user)
-      setAuthLoading(false)
+    return onAuthStateChanged(auth, async user => {
+      setAuthLoading(true)
+      setAuthUser(null)
+      setAccessDenied(false)
+      if (!user) {
+        setAuthLoading(false)
+        return
+      }
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid))
+        if (userDoc.exists() && userDoc.data().enabled === true) setAuthUser(user)
+        else setAccessDenied(true)
+      } catch (error) {
+        console.error('No se pudo verificar la autorización del usuario:', error)
+        setAccessDenied(true)
+      } finally {
+        setAuthLoading(false)
+      }
     })
   }, [])
 
@@ -166,6 +182,7 @@ function App() {
     try {
       await signOut(auth)
       setAuthUser(null)
+      setAccessDenied(false)
     } catch (error) {
       setLogoutError(error.message || 'No se pudo cerrar la sesión. Intentá de nuevo.')
     } finally { setAuthBusy(false) }
@@ -240,7 +257,9 @@ function App() {
   const visibleSearches = searches.filter(search => (searchStatus === 'Todas' || search.status === searchStatus) && (!searchQuery || `${search.title} ${search.area} ${search.location}`.toLowerCase().includes(searchQuery.toLowerCase())))
 
   if (authLoading) return <main className="auth-loading" aria-label="Cargando sesión"><span className="auth-loading-mark">T</span></main>
-  if (!authUser) return <main className="login-page"><div className="login-art"><div className="brand brand-light"><img className="brand-logo" src="/assets/tyc-mark-round.png" alt="Talento y Conocimiento"/><span className="brand-wordmark">Talento y<br/>Conocimiento</span></div><div className="art-copy"><span className="eyebrow">TALENTO, EN UN SOLO LUGAR</span><h1>Las mejores<br/>conexiones<br/><em>empiezan acá.</em></h1></div><div className="art-shape shape-one"/><div className="art-shape shape-two"/></div><section className="login-side"><div className="login-box"><span className="eyebrow">BIENVENIDO/A</span><h2>Ingresá a tu cuenta</h2><p className="muted">Continuá con tu cuenta de Google para acceder al panel.</p>{loginError && <div className="error-msg" role="alert">{loginError}</div>}<button type="button" className="demo-btn" onClick={loginWithGoogle} disabled={authBusy}>{authBusy ? 'Conectando con Google…' : 'Continuar con Google'}</button></div></section></main>
+  if (!authUser) return accessDenied
+    ? <main className="login-page"><div className="login-art"><div className="brand brand-light"><img className="brand-logo" src="/assets/tyc-mark-round.png" alt="Talento y Conocimiento"/><span className="brand-wordmark">Talento y<br/>Conocimiento</span></div><div className="art-copy"><span className="eyebrow">ACCESO RESTRINGIDO</span><h1>Tu cuenta<br/>todavía no<br/><em>está habilitada.</em></h1></div><div className="art-shape shape-one"/><div className="art-shape shape-two"/></div><section className="login-side"><div className="login-box"><span className="eyebrow">USUARIO NO AUTORIZADO</span><h2>No tenés acceso</h2><p className="muted">Tu cuenta no está habilitada para ingresar. Si creés que es un error, contactá a la persona administradora.</p>{logoutError && <div className="error-msg" role="alert">{logoutError}</div>}<button type="button" className="demo-btn" onClick={logout} disabled={authBusy}>{authBusy ? 'Cerrando sesión…' : 'Cerrar sesión'}</button></div></section></main>
+    : <main className="login-page"><div className="login-art"><div className="brand brand-light"><img className="brand-logo" src="/assets/tyc-mark-round.png" alt="Talento y Conocimiento"/><span className="brand-wordmark">Talento y<br/>Conocimiento</span></div><div className="art-copy"><span className="eyebrow">TALENTO, EN UN SOLO LUGAR</span><h1>Las mejores<br/>conexiones<br/><em>empiezan acá.</em></h1></div><div className="art-shape shape-one"/><div className="art-shape shape-two"/></div><section className="login-side"><div className="login-box"><span className="eyebrow">BIENVENIDO/A</span><h2>Ingresá a tu cuenta</h2><p className="muted">Continuá con tu cuenta de Google para acceder al panel.</p>{loginError && <div className="error-msg" role="alert">{loginError}</div>}<button type="button" className="demo-btn" onClick={loginWithGoogle} disabled={authBusy}>{authBusy ? 'Conectando con Google…' : 'Continuar con Google'}</button></div></section></main>
 
   const isAdmin = userEmail.toLowerCase().includes('admin')
   return <div className={`app-shell${darkMode ? ' dark-mode' : ''}`}>
